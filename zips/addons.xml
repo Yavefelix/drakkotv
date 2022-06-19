@@ -1,5 +1,5 @@
 <addons>
-<addon id="plugin.video.drakkotv.nexus" name="DrakkoTV+" version="1.0.2+nexus.1" provider-name="Team Magusplay"> 
+<addon id="plugin.video.drakkotv.nexus" name="DrakkoTV+" version="1.0.3+nexus.1" provider-name="Team Magusplay"> 
 <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests"/>
@@ -22,7 +22,7 @@
        <fanart>fanart.jpg</fanart>
     </assets>
 	<news>
-v1.0.2+nexus.1
+v1.0.3+nexus.1
 - Addon DrakkoTV+ Team Magusplay
 	</news>
 </extension>
