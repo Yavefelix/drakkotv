@@ -6,16 +6,17 @@ import tempfile
 
 from optparse import OptionParser
 
-from flvlib3 import __version__
-from flvlib3.astypes import MalformedFLV
-from flvlib3.constants import (TAG_TYPE_AUDIO, TAG_TYPE_VIDEO, TAG_TYPE_SCRIPT,
-                               AAC_PACKET_TYPE_SEQUENCE_HEADER,
-                               H264_PACKET_TYPE_SEQUENCE_HEADER)
-from flvlib3.helpers import force_remove
-from flvlib3.primitives import make_ui8, make_ui24, make_si32_extended
-from flvlib3.tags import FLV, AudioTag, VideoTag, ScriptTag
+from flvlib import __versionstr__
+from flvlib.constants import TAG_TYPE_AUDIO, TAG_TYPE_VIDEO, TAG_TYPE_SCRIPT
+from flvlib.constants import AAC_PACKET_TYPE_SEQUENCE_HEADER
+from flvlib.constants import H264_PACKET_TYPE_SEQUENCE_HEADER
+from flvlib.primitives import make_ui8, make_ui24, make_si32_extended
+from flvlib.astypes import MalformedFLV
+from flvlib.tags import FLV, EndOfFile, AudioTag, VideoTag, ScriptTag
+from flvlib.helpers import force_remove
 
-log = logging.getLogger('flvlib3.retimestamp-flv')
+log = logging.getLogger('flvlib.retimestamp-flv')
+
 
 class_to_tag = {
     AudioTag: TAG_TYPE_AUDIO,
@@ -24,7 +25,7 @@ class_to_tag = {
 }
 
 
-def is_non_header_media(tag):
+def is_nonheader_media(tag):
     if isinstance(tag, ScriptTag):
         return False
     if isinstance(tag, AudioTag):
@@ -33,24 +34,24 @@ def is_non_header_media(tag):
         return tag.h264_packet_type != H264_PACKET_TYPE_SEQUENCE_HEADER
 
 
-def output_offset_tag(fin, fout, tag, offset):
+def output_offset_tag(fi, fo, tag, offset):
     new_timestamp = tag.timestamp - offset
     # do not offset non-media and media header
-    if not is_non_header_media(tag):
+    if not is_nonheader_media(tag):
         new_timestamp = tag.timestamp
 
     # write the FLV tag value
-    fout.write(make_ui8(class_to_tag[type(tag)]))
+    fo.write(make_ui8(class_to_tag[tag.__class__]))
     # the tag size remains unchanged
-    fout.write(make_ui24(tag.size))
-    # write the new timestamp
-    fout.write(make_si32_extended(new_timestamp))
+    fo.write(make_ui24(tag.size))
+    # wirte the new timestamp
+    fo.write(make_si32_extended(new_timestamp))
     # seek inside the input file
     #   seek position: tag offset + tag (1) + size (3) + timestamp (4)
-    fin.seek(tag.offset + 8, os.SEEK_SET)
+    fi.seek(tag.offset + 8, os.SEEK_SET)
     # copy the tag content to the output file
     #   content size:  tag size + stream ID (3) + previous tag size (4)
-    fout.write(fin.read(tag.size + 7))
+    fo.write(fi.read(tag.size + 7))
 
 
 def retimestamp_tags_inplace(f, fu):
@@ -58,9 +59,9 @@ def retimestamp_tags_inplace(f, fu):
     offset = None
 
     for tag in flv.iter_tags():
-        if offset is None and is_non_header_media(tag):
+        if offset is None and is_nonheader_media(tag):
             offset = tag.timestamp
-            log.debug('Determined the offset to be %d', offset)
+            log.debug("Determined the offset to be %d", offset)
 
         # optimise for offset == 0, which in case of inplace updating is a noop
         if offset is not None and offset != 0:
@@ -68,24 +69,25 @@ def retimestamp_tags_inplace(f, fu):
             fu.write(make_si32_extended(tag.timestamp - offset))
 
 
-def retimestamp_file_inplace(in_path):
+def retimestamp_file_inplace(inpath):
     try:
-        f = open(in_path, 'rb')
-        fu = open(in_path, 'rb+')
-    except IOError as e:
-        log.error('Failed to open "%s": %s', in_path, e)
+        f = open(inpath, 'rb')
+        fu = open(inpath, 'rb+')
+    except IOError, (errno, strerror):
+        log.error("Failed to open `%s': %s", inpath, strerror)
         return False
 
     try:
         retimestamp_tags_inplace(f, fu)
-    except IOError as e:
-        log.error('Failed to create the retimestamped file: %s', e)
+    except IOError, (errno, strerror):
+        log.error("Failed to create the retimestamped file: %s", strerror)
         return False
-    except MalformedFLV as e:
-        log.error('The file "%s" is not a valid FLV file: %s', in_path, e)
+    except MalformedFLV, e:
+        message = e[0] % e[1:]
+        log.error("The file `%s' is not a valid FLV file: %s", inpath, message)
         return False
-    except EOFError:
-        log.error('Unexpected end of file on file "%s"', in_path)
+    except EndOfFile:
+        log.error("Unexpected end of file on file `%s'", inpath)
         return False
 
     f.close()
@@ -94,130 +96,125 @@ def retimestamp_file_inplace(in_path):
     return True
 
 
-def retimestamp_file_atomically(in_path, out_path):
+def retimestamp_file_atomically(inpath, outpath):
     try:
-        fin = open(in_path, 'rb')
-    except IOError as e:
-        log.error('Failed to open "%s": %s', in_path, e)
+        f = open(inpath, 'rb')
+    except IOError, (errno, strerror):
+        log.error("Failed to open `%s': %s", inpath, strerror)
         return False
 
-    if out_path:
+    if outpath:
         try:
-            fout = open(out_path, 'w+b')
-        except IOError as e:
-            log.error('Failed to open "%s": %s', out_path, e)
+            fo = open(outpath, 'w+b')
+        except IOError, (errno, strerror):
+            log.error("Failed to open `%s': %s", outpath, strerror)
             return False
     else:
         try:
-            fd, temp_path = tempfile.mkstemp()
+            fd, temppath = tempfile.mkstemp()
             # preserve the permission bits
-            shutil.copymode(in_path, temp_path)
-            fout = os.fdopen(fd, 'wb')
-        except EnvironmentError as e:
-            log.error('Failed to create temporary file: %s', e)
+            shutil.copymode(inpath, temppath)
+            fo = os.fdopen(fd, 'wb')
+        except EnvironmentError, (errno, strerror):
+            log.error("Failed to create temporary file: %s", strerror)
             return False
 
     try:
-        shutil.copyfileobj(fin, fout)
-    except EnvironmentError as e:
-        log.error('Failed to create temporary copy: %s', e)
-        force_remove(temp_path)
+        shutil.copyfileobj(f, fo)
+    except EnvironmentError, (errno, strerror):
+        log.error("Failed to create temporary copy: %s", strerror)
+        force_remove(temppath)
         return False
 
-    fin.seek(0)
-    fout.seek(0)
+    f.seek(0)
+    fo.seek(0)
 
     try:
-        retimestamp_tags_inplace(fin, fout)
-    except IOError as e:
-        log.error('Failed to create the retimestamped file: %s', e)
-        if not out_path:
-            force_remove(temp_path)
+        retimestamp_tags_inplace(f, fo)
+    except IOError, (errno, strerror):
+        log.error("Failed to create the retimestamped file: %s", strerror)
+        if not outpath:
+            force_remove(temppath)
         return False
-    except MalformedFLV as e:
-        log.error('The file "%s" is not a valid FLV file: %s', in_path, e)
-        if not out_path:
-            force_remove(temp_path)
+    except MalformedFLV, e:
+        message = e[0] % e[1:]
+        log.error("The file `%s' is not a valid FLV file: %s", inpath, message)
+        if not outpath:
+            force_remove(temppath)
         return False
-    except EOFError:
-        log.error('Unexpected end of file on file "%s"', in_path)
-        if not out_path:
-            force_remove(temp_path)
+    except EndOfFile:
+        log.error("Unexpected end of file on file `%s'", inpath)
+        if not outpath:
+            force_remove(temppath)
         return False
 
-    fin.close()
-    fout.close()
+    f.close()
+    fo.close()
 
-    if not out_path:
+    if not outpath:
         # If we were not writing directly to the output file
         # we need to overwrite the original
         try:
-            shutil.move(temp_path, in_path)
-        except EnvironmentError as e:
-            log.error('Failed to overwrite the original file '
-                      'with the indexed version: %s', e)
+            shutil.move(temppath, inpath)
+        except EnvironmentError, (errno, strerror):
+            log.error("Failed to overwrite the original file "
+                      "with the indexed version: %s", strerror)
             return False
 
     return True
 
 
-def retimestamp_file(in_path, out_path=None, inplace=False):
-    out_text = (out_path and ('into file "%s"' % out_path)) or 'and overwriting'
-    log.debug('Retimestamping file "%s" %s', in_path, out_text)
+def retimestamp_file(inpath, outpath=None, inplace=False):
+    out_text = (outpath and ("into file `%s'" % outpath)) or "and overwriting"
+    log.debug("Retimestamping file `%s' %s", inpath, out_text)
 
     if inplace:
-        log.debug('Operating in inplace mode')
-        return retimestamp_file_inplace(in_path)
+        log.debug("Operating in inplace mode")
+        return retimestamp_file_inplace(inpath)
     else:
-        log.debug('Not operating in inplace mode, using temporary files')
-        return retimestamp_file_atomically(in_path, out_path)
+        log.debug("Not operating in inplace mode, using temporary files")
+        return retimestamp_file_atomically(inpath, outpath)
 
 
 def process_options():
-    usage = '%prog [-i] [-U] file [out_file|file2 file3 ...]'
+    usage = "%prog [-i] [-U] file [outfile|file2 file3 ...]"
     description = (
-        'Rewrites timestamps in FLV files making by the first media tag timestamped '
-        'with 0. The rest of the tags is retimestamped relatively. With the -i '
-        '(inplace) option modifies the files without creating temporary copies. With '
-        'the -U (update) option operates on all parameters, updating the files in '
-        'place. Without the -U option accepts one input and one output file path.'
-    )
-    version = '%%prog flvlib3 %r' % __version__
+"""Rewrites timestamps in FLV files making by the first media tag timestamped
+    with 0. The rest of the tags is retimestamped relatively. With the -i
+    (inplace) option modifies the files without creating temporary copies. With
+    the -U (update) option operates on all parameters, updating the files in
+    place. Without the -U option accepts one input and one output file path.
+""")
+    version = "%%prog flvlib %s" % __versionstr__
     parser = OptionParser(usage=usage, description=description,
                           version=version)
-    parser.add_option('-i', '--inplace', action='store_true',
-                      help=('inplace mode, does not create temporary files, but '
-                            'risks corruption in case of errors'))
-    parser.add_option('-U', '--update', action='store_true',
-                      help=('update mode, overwrites the given files '
-                            'instead of writing to out_file'))
-    parser.add_option('-v', '--verbose', action='count',
-                      default=0, dest='verbosity',
-                      help='be more verbose, each -v increases verbosity')
+    parser.add_option("-i", "--inplace", action="store_true",
+                      help=("inplace mode, does not create temporary files, but "
+                            "risks corruption in case of errors"))
+    parser.add_option("-U", "--update", action="store_true",
+                      help=("update mode, overwrites the given files "
+                            "instead of writing to outfile"))
+    parser.add_option("-v", "--verbose", action="count",
+                      default=0, dest="verbosity",
+                      help="be more verbose, each -v increases verbosity")
     options, args = parser.parse_args(sys.argv)
 
     if len(args) < 2:
-        parser.error('You have to provide at least one file path')
+        parser.error("You have to provide at least one file path")
 
     if not options.update and options.inplace:
-        parser.error('You need to use the update mode if you are updating '
-                     'files in place')
+        parser.error("You need to use the update mode if you are updating "
+                     "files in place")
 
     if not options.update and len(args) != 3:
-        parser.error('You need to provide one in_file and one out_file '
-                     'when not using the update mode')
+        parser.error("You need to provide one infile and one outfile "
+                     "when not using the update mode")
 
     if options.verbosity > 3:
         options.verbosity = 3
 
-    level = ({
-        0: logging.ERROR,
-        1: logging.WARNING,
-        2: logging.INFO,
-        3: logging.DEBUG
-    }[options.verbosity])
-
-    log.setLevel(level)
+    log.setLevel({0: logging.ERROR, 1: logging.WARNING,
+                  2: logging.INFO, 3: logging.DEBUG}[options.verbosity])
 
     return options, args
 
@@ -244,8 +241,11 @@ def main():
         # give the right exit status, 128 + signal number
         # signal.SIGINT = 2
         sys.exit(128 + 2)
-    except EnvironmentError as e:
-        print(e, file=sys.stderr)
+    except EnvironmentError, (errno, strerror):
+        try:
+            print >>sys.stderr, strerror
+        except StandardError:
+            pass
         sys.exit(2)
 
     if outcome:
