@@ -27,7 +27,7 @@ v1.0.1+nexus.1
 	</news>
 </extension>
 </addon>
-<addon id="plugin.video.drakkotv.leia" name="Drakko TV+" version="1.0.1+Leia.1" provider-name="Team Addon Magusplay">
+<addon id="plugin.video.drakkotv.leia" name="Drakko TV+" version="1.0.2+Leia.1" provider-name="Team Addon Magusplay">
   <requires>
     <import addon="xbmc.python" version="2.1.0"/>
 	<import addon="script.module.t0mm0.common" version="2.0.0"/>
@@ -52,7 +52,7 @@ v1.0.1+nexus.1
     <summary lang="en">Tenha o melhor conteudo no seu Kodi.</summary>
     <description lang="en"> O addon Equilibrium agora em sua versão para kodi 18.9</description>
      <disclaimer lang="en">Não fazemos parte da equipe do kodi, utilizamos links de terceiros, portanto não nos responsabilizamos por eles.</disclaimer>
-	 	<news>V1.0.1+Leia.1 - Team Magusplay</news>
+	 	<news>V1.0.2+Leia.1 - Team Magusplay</news>
     <platform>all</platform>
 	<assets>
        <icon>icon.png</icon>
